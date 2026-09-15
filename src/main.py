@@ -65,14 +65,65 @@ async def proxy_m3u8(url: str, referer: str):
 @app.get("/proxy_segment")
 async def proxy_segment(url: str, referer: str):
     url = _norm_url(url)
+
     if not url:
-        return Response(content='{"detail":"bad proxy url"}', status_code=400,
-                        media_type="application/json")
-    async with httpx.AsyncClient(timeout=30.0) as client:
+        return Response(
+            content='{"detail":"bad proxy url"}',
+            status_code=400,
+            media_type="application/json"
+        )
+
+    async with httpx.AsyncClient(
+        timeout=30.0,
+        follow_redirects=True
+    ) as client:
+
         h = HEADERS.copy()
         h["Referer"] = referer
-        resp = await client.get(url, headers=h)
-        return Response(content=resp.content, media_type="video/mp2t")
+
+        try:
+            resp = await client.get(url, headers=h)
+
+            content_type = resp.headers.get(
+                "content-type",
+                "application/octet-stream"
+            )
+
+            text = resp.text.strip()
+
+            if text.startswith("Found. Redirecting to "):
+                redirected_url = text.replace(
+                    "Found. Redirecting to ",
+                    "",
+                    1
+                ).strip()
+
+                if redirected_url.startswith("http"):
+                    resp = await client.get(
+                        redirected_url,
+                        headers=h
+                    )
+
+                    content_type = resp.headers.get(
+                        "content-type",
+                        "video/mp4"
+                    )
+
+            return Response(
+                content=resp.content,
+                media_type=content_type.split(";")[0],
+                headers={
+                    "Accept-Ranges": "bytes",
+                    "Cache-Control": "no-cache"
+                }
+            )
+
+        except Exception as e:
+            return Response(
+                content=f'{{"detail":"proxy error: {str(e)}"}}',
+                status_code=502,
+                media_type="application/json"
+            )
 
 
 @app.get("/", response_class=HTMLResponse)
